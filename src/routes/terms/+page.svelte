@@ -2,6 +2,7 @@
 	import Waitlist from '$lib/components/Waitlist.svelte';
 	import { ArrowRight, LogOut } from 'lucide-svelte';
 	import { SignedIn, SignedOut, SignOutButton } from 'svelte-clerk';
+	import Navbar from '$lib/components/Navbar.svelte';
 
 	let currentYear = new Date().getFullYear();
 </script>
@@ -18,51 +19,8 @@
 	class="relative flex min-h-screen flex-col items-center overflow-clip bg-neutral-950 text-white"
 >
 	<!-- NAV -->
-	<nav
-		class="fixed top-0 isolate z-20 flex w-full justify-center bg-linear-to-t from-white/5 to-black/30 backdrop-blur-md"
-	>
-		<div
-			class="flex w-full max-w-sm items-center justify-between px-3 py-5 text-white md:max-w-6xl md:px-0 md:py-4"
-		>
-			<a href="/" class="flex items-center gap-2 transition-opacity duration-300 hover:opacity-80">
-				<img src="/logo.svg" alt="Lekana logo" class="h-6 w-6" />
-				<span class="font-semibold">Lekana</span>
-			</a>
-
-			<div class="hidden items-center gap-8 text-sm text-gray-300 md:flex">
-				<a href="/#about" class="transition-colors duration-300 hover:text-green-500">About</a>
-				<a href="/#faq" class="transition-colors duration-300 hover:text-green-500">FAQ</a>
-
-				<div
-					class="glow-btn flex rounded-full p-0.5 shadow-lg transition-shadow duration-500 hover:shadow-green-500/50"
-				>
-					<a
-						href="/scan"
-						class="flex items-center gap-2 rounded-full bg-black px-6 py-3 transition-colors duration-300 hover:text-white"
-					>
-						Try Demo
-						<ArrowRight />
-					</a>
-				</div>
-			</div>
-		</div>
-	</nav>
-
+	<Navbar />
 	<style>
-		.glow-btn {
-			background: linear-gradient(var(--gradient-angle), #05df72, rgba(167, 243, 208, 0), #05df72);
-			animation: rotation 8s linear infinite;
-		}
-
-		@keyframes rotation {
-			0% {
-				--gradient-angle: 0deg;
-			}
-			100% {
-				--gradient-angle: 360deg;
-			}
-		}
-
 		.policy-content h2 {
 			font-size: 1.5rem;
 			font-weight: 600;
@@ -181,58 +139,56 @@
 	</section>
 
 	<!-- FOOTER -->
-	<footer class="w-full border-t border-green-950/60 bg-black/95">
+	<footer class="w-full border-t border-green-950/60 bg-black/95 z-10">
 		<div class="mx-auto max-w-6xl px-4 py-10 text-sm text-gray-400 md:px-8 md:py-12">
 			<div class="flex w-full justify-end pb-12">
 				<Waitlist />
 			</div>
 			<div class="flex flex-col gap-8 md:flex-row md:items-start md:justify-between">
-					<!-- Brand -->
-					<div class="max-w-sm space-y-3">
-						<p class="text-base font-semibold text-white">Lekana</p>
-						<p class="text-xs leading-relaxed text-gray-500 md:text-sm">
-							An OCR-powered document intake service for businesses. We read your documents,
-							understand them, and route them into your workflow — fully managed, end-to-end.
-						</p>
-					</div>
-
-					<!-- Navigation -->
-					<div class="flex flex-1 flex-wrap gap-10 md:justify-end">
-						<div class="space-y-3">
-							<p class="text-xs font-semibold tracking-wide text-gray-500 uppercase">Product</p>
-							<ul class="space-y-2 text-xs md:text-sm">
-								<li><a href="/#about" class="hover:text-green-500">About</a></li>
-								<li><a href="/#faq" class="hover:text-green-500">FAQ</a></li>
-							</ul>
-						</div>
-						<div class="space-y-3">
-							<p class="text-xs font-semibold tracking-wide text-gray-500 uppercase">Company</p>
-							<ul class="space-y-2 text-xs md:text-sm">
-								<li><a href="/#waitlist" class="hover:text-green-500">Join waitlist</a></li>
-							</ul>
-						</div>
-						<div class="space-y-3">
-							<p class="text-xs font-semibold tracking-wide text-gray-500 uppercase">Legal</p>
-							<ul class="space-y-2 text-xs md:text-sm">
-								<li><a href="/privacy" class="hover:text-green-500">Privacy</a></li>
-								<li><a href="/terms" class="text-green-500">Terms</a></li>
-							</ul>
-						</div>
-					</div>
-
-				
-				</div>
-
-				<hr class="mt-8 border-neutral-800" />
-
-				<div
-					class="mt-4 flex flex-col items-center justify-between gap-3 text-[11px] text-gray-500 md:flex-row md:text-xs"
-				>
-					<p>Lekana © {currentYear}. All rights reserved.</p>
-					<p class="text-center md:text-right">
-						Built for businesses that are done with the chaos of documents.
+				<!-- Brand -->
+				<div class="max-w-sm space-y-3">
+					<p class="text-base font-semibold text-white">Lekana</p>
+					<p class="text-xs leading-relaxed text-gray-500 md:text-sm">
+						An OCR-powered document intake service for businesses. We read your documents,
+						understand them, and route them into your workflow — fully managed, end-to-end.
 					</p>
 				</div>
+
+				<!-- Navigation -->
+				<div class="flex flex-1 flex-wrap gap-10 md:justify-end">
+					<div class="space-y-3">
+						<p class="text-xs font-semibold tracking-wide text-gray-500 uppercase">Product</p>
+						<ul class="space-y-2 text-xs md:text-sm">
+							<li><a href="/#about" class="hover:text-green-500">About</a></li>
+							<li><a href="/#faq" class="hover:text-green-500">FAQ</a></li>
+						</ul>
+					</div>
+					<div class="space-y-3">
+						<p class="text-xs font-semibold tracking-wide text-gray-500 uppercase">Company</p>
+						<ul class="space-y-2 text-xs md:text-sm">
+							<li><a href="/#waitlist" class="hover:text-green-500">Join waitlist</a></li>
+						</ul>
+					</div>
+					<div class="space-y-3">
+						<p class="text-xs font-semibold tracking-wide text-gray-500 uppercase">Legal</p>
+						<ul class="space-y-2 text-xs md:text-sm">
+							<li><a href="/privacy" class="hover:text-green-500">Privacy</a></li>
+							<li><a href="/terms" class="text-green-500">Terms</a></li>
+						</ul>
+					</div>
+				</div>
 			</div>
+
+			<hr class="mt-8 border-neutral-800" />
+
+			<div
+				class="mt-4 flex flex-col items-center justify-between gap-3 text-[11px] text-gray-500 md:flex-row md:text-xs"
+			>
+				<p>Lekana © {currentYear}. All rights reserved.</p>
+				<p class="text-center md:text-right">
+					Built for businesses that are done with the chaos of documents.
+				</p>
+			</div>
+		</div>
 	</footer>
 </main>

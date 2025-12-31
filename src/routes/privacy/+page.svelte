@@ -2,6 +2,7 @@
 	import Waitlist from '$lib/components/Waitlist.svelte';
 	import { ArrowRight, LogOut } from 'lucide-svelte';
 	import { SignedIn, SignedOut, SignOutButton } from 'svelte-clerk';
+	import Navbar from '$lib/components/Navbar.svelte';
 
 	let currentYear = new Date().getFullYear();
 </script>
@@ -15,51 +16,8 @@
 	class="relative flex min-h-screen flex-col items-center overflow-clip bg-neutral-950 text-white"
 >
 	<!-- NAV -->
-	<nav
-		class="fixed top-0 isolate z-20 flex w-full justify-center bg-linear-to-t from-white/5 to-black/30 backdrop-blur-md"
-	>
-		<div
-			class="flex w-full max-w-sm items-center justify-between px-3 py-5 text-white md:max-w-6xl md:px-0 md:py-4"
-		>
-			<a href="/" class="flex items-center gap-2 transition-opacity duration-300 hover:opacity-80">
-				<img src="/logo.svg" alt="Lekana logo" class="h-6 w-6" />
-				<span class="font-semibold">Lekana</span>
-			</a>
-
-			<div class="hidden items-center gap-8 text-sm text-gray-300 md:flex">
-				<a href="/#about" class="transition-colors duration-300 hover:text-green-500">About</a>
-				<a href="/#faq" class="transition-colors duration-300 hover:text-green-500">FAQ</a>
-
-				<div
-					class="glow-btn flex rounded-full p-0.5 shadow-lg transition-shadow duration-500 hover:shadow-green-500/50"
-				>
-					<a
-						href="/scan"
-						class="flex items-center gap-2 rounded-full bg-black px-6 py-3 transition-colors duration-300 hover:text-white"
-					>
-						Try Demo
-						<ArrowRight />
-					</a>
-				</div>
-			</div>
-		</div>
-	</nav>
-
+	<Navbar />
 	<style>
-		.glow-btn {
-			background: linear-gradient(var(--gradient-angle), #05df72, rgba(167, 243, 208, 0), #05df72);
-			animation: rotation 8s linear infinite;
-		}
-
-		@keyframes rotation {
-			0% {
-				--gradient-angle: 0deg;
-			}
-			100% {
-				--gradient-angle: 360deg;
-			}
-		}
-
 		.policy-content h2 {
 			font-size: 1.5rem;
 			font-weight: 600;
@@ -160,7 +118,7 @@
 	</section>
 
 	<!-- FOOTER -->
-	<footer class="w-full border-t border-green-950/60 bg-black/95">
+	<footer class="w-full border-t border-green-950/60 bg-black/95 z-10">
 		<div class="mx-auto max-w-6xl px-4 py-10 text-sm text-gray-400 md:px-8 md:py-12">
 			<div class="flex w-full justify-end pb-12">
 				<Waitlist />

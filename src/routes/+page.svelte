@@ -12,6 +12,7 @@
 		Languages,
 		ArrowRight
 	} from 'lucide-svelte';
+	import Navbar from '$lib/components/Navbar.svelte';
 
 	const steps = [
 		{ label: 'Upload Document', icon: CloudUpload },
@@ -233,52 +234,8 @@
 </svelte:head>
 
 <main class="relative flex flex-col items-center overflow-x-clip bg-neutral-950">
-	<!-- NAV -->
-	<nav
-		class="fixed top-0 isolate z-20 flex w-full justify-center bg-linear-to-t from-white/5 to-black/30 backdrop-blur-md"
-	>
-		<div
-			class="flex w-full max-w-sm items-center justify-between px-3 py-5 text-white md:max-w-6xl md:px-0 md:py-4"
-		>
-			<a href="/" class="flex items-center gap-2 transition-opacity duration-300 hover:opacity-80">
-				<img src="/logo.svg" alt="logo" class="h-6 w-6" />
-				<span class="font-semibold">Lekana</span>
-			</a>
-
-			<div class="hidden items-center gap-8 text-sm text-gray-300 md:flex">
-				<a href="#about" class="transition-colors duration-300 hover:text-green-500">About</a>
-				<a href="#faq" class="transition-colors duration-300 hover:text-green-500">FAQ</a>
-
-				<div
-					class="glow-btn flex rounded-full p-0.5 shadow-lg transition-shadow duration-500 hover:shadow-green-500/50"
-				>
-					<a
-						href="/scan"
-						class="flex items-center gap-2 rounded-full bg-black px-6 py-3 transition-colors duration-300 hover:text-white"
-					>
-						Try Demo
-						<ArrowRight />
-					</a>
-				</div>
-			</div>
-		</div>
-	</nav>
-
+	<Navbar />
 	<style>
-		.glow-btn {
-			background: linear-gradient(var(--gradient-angle), #05df72, rgba(167, 243, 208, 0), #05df72);
-			animation: rotation 8s linear infinite;
-		}
-
-		@keyframes rotation {
-			0% {
-				--gradient-angle: 0deg;
-			}
-			100% {
-				--gradient-angle: 360deg;
-			}
-		}
-
 		.chaos-text {
 			font-family: 'Caveat', cursive;
 			color: #05df72;
@@ -330,7 +287,7 @@
 	<section
 		class="relative z-10 flex min-h-screen max-w-sm flex-col px-3 py-8 pt-24 text-white md:h-screen md:max-w-6xl md:flex-row md:py-32 md:pt-44"
 	>
-		<div class="relative z-10 flex flex-col justify-center w-full">
+		<div class="relative z-10 flex w-full flex-col justify-center">
 			<div class="mb-6 flex flex-col gap-4 px-2">
 				<h1 class="text-5xl leading-tight font-bold text-zinc-300 md:text-6xl">
 					Say goodbye to the document <span class="chaos-text -mt-4">chaos.</span>
