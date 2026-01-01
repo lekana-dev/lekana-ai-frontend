@@ -215,7 +215,8 @@
 			currentStep = 4;
 		} catch (err) {
 			console.error('Processing error:', err);
-			error = err.message || 'Something went wrong. Please try again.';
+			error =
+				"We're seeing a lot of activity right now! Our servers are working hard to catch up. Please wait a moment and try again, we'll be ready for you soon.";
 		} finally {
 			isProcessing = false;
 		}
@@ -696,14 +697,26 @@
 
 					{#if error}
 						<div class="max-w-md text-center">
-							<div class="mb-6 rounded-xl border border-red-900/50 bg-red-950/20 p-6">
-								<p class="text-sm text-red-400">{error}</p>
+							<div
+								class="mb-6 rounded-2xl border border-amber-900/30 bg-amber-950/10 p-8 backdrop-blur-sm"
+							>
+								<div class="mb-4 flex justify-center">
+									<div
+										class="flex h-12 w-12 items-center justify-center rounded-full bg-amber-900/20"
+									>
+										<Clock class="h-6 w-6 text-amber-500" />
+									</div>
+								</div>
+								<h3 class="mb-2 text-lg font-medium text-amber-200">Just a moment...</h3>
+								<p class="text-sm leading-relaxed text-amber-200/70">{error}</p>
 							</div>
 							<button
 								onclick={processFiles}
-								class="rounded-full border border-neutral-700 px-6 py-3 text-gray-300 transition-colors hover:border-green-500"
+								class="group mx-auto flex items-center gap-2 rounded-full border border-neutral-700 px-8 py-3 text-sm text-gray-300 transition-all hover:border-amber-500/50 hover:bg-amber-950/20 hover:text-amber-200"
 							>
-								Try Again
+								Try again in a bit <ArrowRight
+									class="h-4 w-4 transition-transform group-hover:translate-x-1"
+								/>
 							</button>
 						</div>
 					{/if}
