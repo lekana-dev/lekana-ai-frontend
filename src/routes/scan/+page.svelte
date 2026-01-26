@@ -610,9 +610,21 @@
 
 					<div class="flex w-full max-w-md items-center justify-center">
 						{#if authMode === 'signup'}
-							<SignUp redirectUrl="/scan" />
+							<SignUp
+								routing="hash"
+								redirectUrl="/scan"
+								fallbackUrl="/scan"
+								afterSignUpUrl="/scan"
+								appearance={{ elements: { footer: { display: 'none' } } }}
+							/>
 						{:else}
-							<SignIn redirectUrl="/scan" />
+							<SignIn
+								routing="hash"
+								redirectUrl="/scan"
+								fallbackUrl="/scan"
+								afterSignInUrl="/scan"
+								appearance={{ elements: { footer: { display: 'none' } } }}
+							/>
 						{/if}
 					</div>
 
