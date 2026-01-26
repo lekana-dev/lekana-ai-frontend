@@ -1,7 +1,8 @@
 // src/routes/api/scan/+server.ts
+import { SCAN_OCR_BASE } from '$env/static/private';
 import type { RequestHandler } from './$types';
 
-const UPSTREAM_BASE = 'https://lekana-ai-ocr-533849219780.europe-west1.run.app';
+const UPSTREAM_BASE = SCAN_OCR_BASE;
 
 export const POST: RequestHandler = async (event) => {
     const { locals, fetch, request } = event;
