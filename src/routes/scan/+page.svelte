@@ -660,7 +660,7 @@
 
 							<button
 								onclick={processFiles}
-								class="flex w-full items-center justify-center gap-2 rounded-full bg-neutral-800 px-8 py-3 text-white transition-all duration-300 hover:bg-neutral-900"
+								class="flex w-full items-center  justify-center gap-2 rounded-full bg-neutral-800 px-8 py-3 text-white transition-all duration-300 hover:bg-neutral-900"
 							>
 								<Sparkles class="h-4 w-4" /> Proceed to Results
 							</button>
