@@ -13,7 +13,7 @@
 </svelte:head>
 
 <main
-	class="relative flex min-h-screen flex-col items-center overflow-x-clip bg-neutral-950 text-white"
+	class="relative flex overflow-hidden h-screen flex-col items-center bg-neutral-950 text-white"
 >
 	<!-- Background Glows -->
 	<div
@@ -35,18 +35,18 @@
 				{status}
 			</h1>
 
-			<h2 class="mb-4 text-2xl font-bold text-white md:text-3xl">
+			<h2 class="mb-4 text-2xl font-bold text-white">
 				{message}
 			</h2>
 
 			<div class="flex gap-6 self-stretch justify-center">
-				<!-- <button
+				<button
 					onclick={() => window.history.back()}
 					class="inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-8 py-3 text-sm font-medium transition-all hover:bg-white/10"
 				>
 					<ArrowLeft size="18" />
 					Go Back
-				</button> -->
+				</button>
 
 				<a
 					href="/"

@@ -7,14 +7,18 @@
 		X,
 		Play,
 		Loader2,
-		CheckCircle2,
-		AlertCircle,
+		CircleCheck,
+		CircleAlert,
 		Plus,
 		Minus,
-		Upload
+		Upload,
+		Check,
+		CircleX
 	} from 'lucide-svelte';
 	import { fade, fly } from 'svelte/transition';
 	import { toast } from '$lib/toast.svelte';
+
+	import { PUBLIC_API_URL } from '$env/static/public';
 
 	let { data } = $props();
 
@@ -22,22 +26,75 @@
 	const user: User = data?.user;
 
 	// State for Run Request
-	let inputType = $state<'url' | 'file'>('url');
-	let message = $state('');
-	let documentUrl = $state('');
-	let documentName = $state('');
 	let files = $state<File[]>([]);
-
 	let apiKey = $state('');
+
 	let loading = $state(false);
-	let result = $state<any>(null);
+	let success = $state(false);
+	let showError = $state(false);
 	let error = $state<string | null>(null);
+	let feedbackProgress = $state(100);
+
+	// Supported file types for Google Document AI + ZIP for bulk uploads
+	const SUPPORTED_MIME_TYPES = new Set([
+		'application/pdf',
+		'image/jpeg',
+		'image/png',
+		'image/gif',
+		'image/tiff',
+		'image/bmp',
+		'image/webp',
+		'application/zip',
+		'application/x-zip-compressed'
+	]);
+
+	const SUPPORTED_EXTENSIONS = new Set([
+		'pdf',
+		'jpg',
+		'jpeg',
+		'png',
+		'gif',
+		'tif',
+		'tiff',
+		'bmp',
+		'webp',
+		'zip'
+	]);
+
+	function isFileSupported(file: File): boolean {
+		// Check MIME type first
+		if (SUPPORTED_MIME_TYPES.has(file.type)) return true;
+
+		// Fallback to extension check (in case MIME type is missing)
+		const ext = file.name.split('.').pop()?.toLowerCase();
+		return ext ? SUPPORTED_EXTENSIONS.has(ext) : false;
+	}
 
 	// File Handling
 	function handleFileSelect(e: Event) {
 		const target = e.target as HTMLInputElement;
 		if (target.files) {
-			files = [...files, ...Array.from(target.files)];
+			const newFiles = Array.from(target.files);
+			const validFiles: File[] = [];
+			const invalidFiles: string[] = [];
+
+			for (const file of newFiles) {
+				if (isFileSupported(file)) {
+					validFiles.push(file);
+				} else {
+					invalidFiles.push(file.name);
+				}
+			}
+
+			if (invalidFiles.length > 0) {
+				const unsupportedNames = invalidFiles.join(', ');
+				toast.error(
+					`Unsupported file type: ${unsupportedNames}. Supported types: PDF, JPEG, PNG, GIF, TIFF, BMP, WebP`
+				);
+			}
+
+			files = [...files, ...validFiles];
+			target.value = '';
 		}
 	}
 
@@ -46,53 +103,77 @@
 	}
 
 	async function runWorkflow() {
+		if (loading) return;
 		loading = true;
-		result = null;
+		success = false;
+		showError = false;
 		error = null;
 
 		try {
-			let response;
 			const headers: Record<string, string> = {
 				'X-API-Key': apiKey
 			};
 
-			if (inputType === 'url') {
-				response = await fetch(`/rime/workflows/${workflow.id}/run`, {
-					method: 'POST',
-					headers: {
-						...headers,
-						'Content-Type': 'application/json'
-					},
-					body: JSON.stringify({
-						input: { message },
-						documents: [{ url: documentUrl, filename: documentName, mimeType: 'application/pdf' }]
-					})
-				});
-			} else {
-				const formData = new FormData();
-				formData.append('message', message);
-				files.forEach((file) => {
-					formData.append('files', file);
-				});
+			const formData = new FormData();
+			files.forEach((file) => {
+				formData.append('files', file);
+			});
 
-				response = await fetch(`/rime/workflows/${workflow.id}/run-with-files`, {
+			const response = await fetch(
+				`${PUBLIC_API_URL}/api/v1/workflows/${workflow.id}/run-with-files`,
+				{
 					method: 'POST',
 					headers: headers,
 					body: formData
-				});
-			}
+				}
+			);
 
 			if (!response.ok) {
 				const errorData = await response.json().catch(() => ({}));
-				throw new Error(errorData.message || 'Failed to run workflow');
+				// Check for error message in multiple possible locations
+				const errorMessage =
+					errorData.message ||
+					errorData.error?.message ||
+					errorData.error ||
+					`Request failed with status ${response.status}`;
+				throw new Error(errorMessage);
 			}
 
-			result = await response.json();
+			// Clear fields on success
+			files = [];
+			success = true;
 		} catch (e: any) {
 			error = e.message || 'Something went wrong';
-			toast.error(`Failed to run workflow: ${error}. Please try again in a moment.`);
+			showError = true;
+
+			// Reset error state after a delay with progress
+			let duration = 5000;
+			let elapsed = 0;
+			let interval = setInterval(() => {
+				elapsed += 100;
+				feedbackProgress = 100 - (elapsed / duration) * 100;
+				if (elapsed >= duration) {
+					clearInterval(interval);
+					showError = false;
+					error = null;
+					feedbackProgress = 100;
+				}
+			}, 100);
 		} finally {
 			loading = false;
+			if (success) {
+				let duration = 3000;
+				let elapsed = 0;
+				let interval = setInterval(() => {
+					elapsed += 100;
+					feedbackProgress = 100 - (elapsed / duration) * 100;
+					if (elapsed >= duration) {
+						clearInterval(interval);
+						success = false;
+						feedbackProgress = 100;
+					}
+				}, 100);
+			}
 		}
 	}
 </script>
@@ -101,15 +182,23 @@
 	<title>Run Workflow - {workflow.name}</title>
 </svelte:head>
 
-<main class="min-h-screen bg-zinc-950 text-white">
-	<!-- HEADER: Strictly following request for only SignedIn/UserButton -->
-	<header class="fixed top-0 z-50 flex w-full justify-end px-8 py-4">
+<main
+	class="flex min-h-screen w-full flex-col items-center justify-center bg-zinc-950 px-4 text-white"
+>
+	<!-- HEADER -->
+	<header
+		class="fixed top-0 z-50 flex w-full max-w-3xl items-center justify-between border-b border-zinc-900/50 bg-zinc-950/50 px-4 py-4 backdrop-blur-md md:px-0"
+	>
+		<a href="/dashboard" class="flex items-center gap-2.5">
+			<img src="/logo.svg" alt="Lekana Logo" class="h-6 w-6" />
+			<span class="text-lg font-bold tracking-tight text-white/90">Lekana</span>
+		</a>
 		<SignedIn>
 			<UserButton />
 		</SignedIn>
 	</header>
 
-	<div class="mx-auto max-w-3xl px-6 pt-24 pb-10">
+	<div class="w-full max-w-3xl pt-20 pb-10">
 		<div class="mb-12 flex flex-col gap-2">
 			<div class="flex items-center gap-3">
 				<div
@@ -121,29 +210,10 @@
 					{workflow.name}
 				</h1>
 			</div>
-			<p class="text-zinc-500">Run this workflow by providing a document URL or uploading files.</p>
+			<p class="text-zinc-500">Run this workflow by uploading your documents.</p>
 		</div>
 
-		<div class="grid gap-8">
-			<!-- Input Type Toggle -->
-			<div class="flex rounded-xl bg-zinc-900 p-1">
-				<button
-					onclick={() => (inputType = 'url')}
-					class="flex-1 rounded-lg py-2 text-sm font-medium transition-all {inputType === 'url'
-						? 'bg-zinc-800 text-white shadow-sm'
-						: 'text-zinc-500 hover:text-zinc-300'}"
-				>
-					Document URL
-				</button>
-				<button
-					onclick={() => (inputType = 'file')}
-					class="flex-1 rounded-lg py-2 text-sm font-medium transition-all {inputType === 'file'
-						? 'bg-zinc-800 text-white shadow-sm'
-						: 'text-zinc-500 hover:text-zinc-300'}"
-				>
-					Upload File
-				</button>
-			</div>
+		<div class="flex w-full flex-col gap-6">
 			<!-- Authentication Section -->
 			<section class="space-y-4">
 				<h2 class="text-lg font-semibold text-zinc-200">Authentication</h2>
@@ -154,130 +224,111 @@
 					bind:value={apiKey}
 				/>
 			</section>
+
 			<!-- Documents Section -->
 			<section class="space-y-4">
 				<div class="flex items-center justify-between">
-					<h2 class="text-lg font-semibold text-zinc-200">
-						{inputType === 'url' ? 'Document URL' : 'Upload Files'}
-					</h2>
-					{#if inputType === 'file'}
-						<span class="text-xs text-zinc-500"
-							>{files.length} file{files.length === 1 ? '' : 's'} added</span
-						>
+					<h2 class="text-lg font-semibold text-zinc-200">Upload Files</h2>
+					<span class="text-xs text-zinc-500"
+						>{files.length} file{files.length === 1 ? '' : 's'} added</span
+					>
+				</div>
+
+				<div class="grid w-full gap-8 md:grid-cols-2" in:fade>
+					<div
+						class="relative flex flex-col {files.length > 0
+							? ''
+							: 'md:col-span-2'} min-h-72 items-center justify-center rounded-2xl border-2 border-dashed border-zinc-800 bg-zinc-900/50 p-10 transition-colors hover:border-green-500/50 hover:bg-zinc-900/80"
+					>
+						<input
+							type="file"
+							multiple
+							accept=".pdf,.zip,image/*"
+							class="absolute inset-0 cursor-pointer opacity-0"
+							onchange={handleFileSelect}
+						/>
+						<CloudUpload class="mb-4 h-10 w-10 text-zinc-600" />
+						<p class="text-zinc-400">Click or drag documents to upload</p>
+						<p class="mt-1 text-xs text-zinc-600">PDF, Images, ZIP</p>
+					</div>
+
+					{#if files.length > 0}
+						<div class="mt-4 max-h-72 space-y-2 overflow-y-auto pr-2">
+							{#each files as file, i}
+								<div
+									class="flex items-center justify-between rounded-xl bg-zinc-900 p-4 transition-all hover:bg-zinc-800/80"
+								>
+									<div class="flex items-center gap-3">
+										<FileText class="h-5 w-5 text-green-500/60" />
+										<div>
+											<p class="text-sm font-medium text-zinc-200">{file.name}</p>
+											<p class="text-xs text-zinc-500">
+												{(file.size / 1024).toFixed(1)} KB
+											</p>
+										</div>
+									</div>
+									<button
+										onclick={() => removeFile(i)}
+										class="rounded-lg p-2 text-zinc-500 transition-colors hover:bg-white/5 hover:text-white"
+									>
+										<X class="h-4 w-4" />
+									</button>
+								</div>
+							{/each}
+						</div>
 					{/if}
 				</div>
+			</section>
 
-				{#if inputType === 'url'}
-					<div class="space-y-4" in:fade>
-						<input
-							type="url"
-							placeholder="https://example.com/document.pdf"
-							class="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm transition-all outline-none focus:border-green-500/50 focus:ring-1 focus:ring-green-500/50"
-							bind:value={documentUrl}
-						/>
-						<input
-							type="text"
-							placeholder="Document Name"
-							class="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm transition-all outline-none focus:border-green-500/50 focus:ring-1 focus:ring-green-500/50"
-							bind:value={documentName}
-						/>
+			<!-- Inputs Section Removed (Message) -->
+
+			<div class="flex items-center justify-end gap-4 md:col-span-2">
+				{#if showError && error}
+					<div
+						class="flex items-center gap-2 text-sm font-medium text-red-500"
+						in:fly={{ x: 10, duration: 300 }}
+						out:fade
+					>
+						<CircleAlert class="h-4 w-4" />
+						<span>{error}</span>
 					</div>
-				{:else}
-					<div in:fade>
-						<div
-							class="relative flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-zinc-800 bg-zinc-900/50 p-10 transition-colors hover:border-green-500/50 hover:bg-zinc-900/80"
-						>
-							<input
-								type="file"
-								multiple
-								class="absolute inset-0 cursor-pointer opacity-0"
-								onchange={handleFileSelect}
-							/>
-							<CloudUpload class="mb-4 h-10 w-10 text-zinc-600" />
-							<p class="text-zinc-400">Click or drag documents to upload</p>
-							<p class="mt-1 text-xs text-zinc-600">PDF, images, etc.</p>
+				{/if}
+
+				<button
+					onclick={runWorkflow}
+					disabled={loading || files.length === 0 || apiKey.trim() === ''}
+					class="group relative flex items-center justify-center gap-2 overflow-hidden rounded-xl px-8 py-3 font-semibold text-white shadow-xl transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-500 {success
+						? 'bg-green-600'
+						: showError
+							? 'bg-red-600'
+							: 'bg-green-600 shadow-green-950/20 hover:bg-green-500'}"
+				>
+					{#if loading}
+						<Loader2 class="h-4 w-4 animate-spin" />
+						<span>Uploading...</span>
+					{:else if success}
+						<div class="flex items-center gap-2" in:fade>
+							<Check class="h-4 w-4" />
+							<span>Success</span>
 						</div>
+					{:else if showError}
+						<div class="flex items-center gap-2" in:fade>
+							<CircleX class="h-4 w-4" />
+							<span>Failed</span>
+						</div>
+					{:else}
+						<Upload class="h-4 w-4 transition-transform group-hover:scale-110" />
+						<span>Upload</span>
+					{/if}
 
-						{#if files.length > 0}
-							<div class="mt-4 space-y-2">
-								{#each files as file, i}
-									<div
-										class="flex items-center justify-between rounded-xl bg-zinc-900 p-4 transition-all hover:bg-zinc-800/80"
-									>
-										<div class="flex items-center gap-3">
-											<FileText class="h-5 w-5 text-green-500/60" />
-											<div>
-												<p class="text-sm font-medium text-zinc-200">{file.name}</p>
-												<p class="text-xs text-zinc-500">
-													{(file.size / 1024).toFixed(1)} KB
-												</p>
-											</div>
-										</div>
-										<button
-											onclick={() => removeFile(i)}
-											class="rounded-lg p-2 text-zinc-500 transition-colors hover:bg-white/5 hover:text-white"
-										>
-											<X class="h-4 w-4" />
-										</button>
-									</div>
-								{/each}
-							</div>
-						{/if}
-					</div>
-				{/if}
-			</section>
-
-			<!-- Inputs Section -->
-			<section class="space-y-4">
-				<h2 class="text-lg font-semibold text-zinc-200">Message</h2>
-				<textarea
-					bind:value={message}
-					placeholder="Enter your message here..."
-					rows="4"
-					class="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm transition-all outline-none focus:border-green-500/50 focus:ring-1 focus:ring-green-500/50"
-				></textarea>
-			</section>
-
-			<!-- Action Button -->
-			<button
-				onclick={runWorkflow}
-				disabled={loading || (inputType === 'file' ? files.length === 0 : !documentUrl)}
-				class="group relative mt-4 flex items-center justify-center gap-3 overflow-hidden rounded-2xl bg-green-600 py-4 font-bold text-white shadow-xl shadow-green-950/20 transition-all hover:bg-green-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-500"
-			>
-				{#if loading}
-					<Loader2 class="h-5 w-5 animate-spin" />
-					<span>Uploading...</span>
-				{:else}
-					<Upload class="h-5 w-5 transition-transform group-hover:scale-110" />
-					<span>Upload</span>
-				{/if}
-			</button>
-
-			<!-- Result/Error feedback -->
-			{#if result}
-				<div
-					in:fly={{ y: 20, duration: 400 }}
-					class="mt-6 flex flex-col gap-4 rounded-2xl border border-green-500/30 bg-green-500/10 p-6"
-				>
-					<div class="flex items-center gap-3 text-green-400">
-						<CheckCircle2 class="h-6 w-6" />
-						<h3 class="text-lg font-semibold">Uploaded Successfully</h3>
-					</div>
-				</div>
-			{/if}
-
-			{#if error}
-				<div
-					in:fly={{ y: 20, duration: 400 }}
-					class="mt-6 flex flex-col gap-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-6"
-				>
-					<div class="flex items-center gap-3 text-red-400">
-						<AlertCircle class="h-6 w-6" />
-						<h3 class="text-lg font-semibold">Upload Failed</h3>
-					</div>
-					<p class="text-sm text-zinc-400">{error}</p>
-				</div>
-			{/if}
+					{#if success || showError}
+						<div
+							class="absolute bottom-0 left-0 h-0.5 bg-white transition-all duration-100"
+							style="width: {feedbackProgress}%"
+						></div>
+					{/if}
+				</button>
+			</div>
 		</div>
 	</div>
 </main>

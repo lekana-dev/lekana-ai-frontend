@@ -40,11 +40,29 @@
 
 			// build the fields array that the <Input> loop expects
 			// dynamically match node.config with step.uiSchema.fields
-			fields = step.uiSchema.fields.map((field) => ({
-				...field,
-				value: node?.config?.[field.name] ?? field.value ?? field.defaultValue,
-				testConnectionStatus: field.testConnection ? (node?.config?.testConnection ?? false) : false
-			}));
+			fields = step.uiSchema.fields.map((field) => {
+				const rawValue = node?.config?.[field.name] ?? field.value ?? field.defaultValue;
+				// Deep clone if it's an object or array to avoid reference sharing
+				const value =
+					typeof rawValue === 'object' && rawValue !== null
+						? JSON.parse(JSON.stringify(rawValue))
+						: rawValue;
+
+				const rawOriginalValue = node?.config?.[field.name];
+				const originalValue =
+					typeof rawOriginalValue === 'object' && rawOriginalValue !== null
+						? JSON.parse(JSON.stringify(rawOriginalValue))
+						: rawOriginalValue;
+
+				return {
+					...field,
+					value,
+					originalValue, // Only set if it comes from the node config
+					testConnectionStatus: field.testConnection
+						? (node?.config?.testConnection ?? false)
+						: false
+				};
+			});
 		} catch (error) {
 			console.error('Error loading fields:', error);
 			toast.error('Something went wrong. Please try again in a moment.');
@@ -92,9 +110,41 @@
 		});
 	}
 
+	$effect(() => {
+		fields.forEach((field) => {
+			if (!isVisible(field)) {
+				const emptyValue =
+					field.defaultValue ??
+					(['array', 'keyValue', 'checkbox-group'].includes(field.type)
+						? []
+						: field.type === 'checkbox'
+							? false
+							: field.type === 'number'
+								? null
+								: '');
+
+				// Only update if current value is different to avoid unnecessary reactive loops
+				if (JSON.stringify(field.value) !== JSON.stringify(emptyValue)) {
+					field.value = emptyValue;
+				}
+			}
+		});
+	});
+
 	let isValid = $derived(
 		fields.every((field) => {
 			if (!isVisible(field) || !field.required) return true;
+
+			// Special handling for dbUrl in edit mode
+			if (field.type === 'dbUrl' && field.originalValue !== undefined) {
+				// In edit mode, dbUrl is optional unless modified
+				const isModified = field.value !== field.originalValue;
+				if (!isModified) return true; // Skip validation if not modified
+
+				// If modified, validate the new value
+				if (field.testConnection && !field.testConnectionStatus) return false;
+				return field.value !== undefined && field.value !== null && field.value !== '';
+			}
 
 			// If field requires connection test, it must be successful
 			if (field.testConnection && !field.testConnectionStatus) return false;
@@ -109,15 +159,31 @@
 		})
 	);
 
+	// Check if any fields have been modified (for edit mode)
+	let hasChanges = $derived(
+		!node ||
+			fields.some((field) => {
+				if (!isVisible(field)) return false;
+				return JSON.stringify(field.value) !== JSON.stringify(field.originalValue);
+			})
+	);
+
 	async function formSubmit() {
 		if (!isValid) return;
 		try {
 			loading = true;
 			const config = fields.reduce((acc, field) => {
 				if (!isVisible(field)) return acc; // Don't submit hidden fields
+
+				// Skip dbUrl in edit mode if not modified
+				if (field.type === 'dbUrl' && field.originalValue !== undefined) {
+					const isModified = field.value !== field.originalValue;
+					if (!isModified) return acc; // Don't include unmodified dbUrl
+				}
+
 				acc[field.name] = field.value;
-				if (field.testConnection) {
-					acc['testConnection'] = field.testConnectionStatus;
+				if (field.testConnection && !field.testConnectionStatus) {
+					return acc;
 				}
 				return acc;
 			}, {});
@@ -217,7 +283,7 @@
 						<button
 							type="button"
 							onclick={formSubmit}
-							disabled={!isValid || loading}
+							disabled={!isValid || !hasChanges || loading}
 							class="flex items-center gap-2 rounded-md bg-green-700 px-4 py-2 text-xs font-medium text-white transition-colors duration-300 hover:bg-green-800 disabled:bg-zinc-800 disabled:opacity-50"
 						>
 							{node ? 'Update Action' : 'Add Action to Workflow'}
@@ -243,7 +309,7 @@
 						</div>
 					</div>
 
-					<div class="space-y-6 py-2">
+					<div class="animate-pulse space-y-6 py-2">
 						{#each Array(3) as _}
 							<div class="space-y-2">
 								<div class="h-3 w-20 rounded bg-white/5"></div>
@@ -252,7 +318,7 @@
 						{/each}
 					</div>
 
-					<div class="mt-7 flex items-center justify-end pb-6">
+					<div class="mt-7 flex animate-pulse items-center justify-end pb-6">
 						<div class="h-9 w-40 rounded-md bg-white/5"></div>
 					</div>
 				{/if}

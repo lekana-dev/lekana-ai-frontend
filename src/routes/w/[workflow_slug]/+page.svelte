@@ -10,7 +10,7 @@
 	import { onMount } from 'svelte';
 	import {
 		Settings2,
-		CheckCircle2,
+		CircleCheck,
 		Key,
 		Terminal,
 		Check,
@@ -29,7 +29,6 @@
 	import { toast } from '$lib/toast.svelte';
 	import Publish from '$lib/components/Publish.svelte';
 	import SettingsModal from '$lib/components/SettingsModal.svelte';
-	import RoleManagement from '$lib/components/RoleManagement.svelte';
 	import { Activity, LineChart } from 'lucide-svelte';
 
 	let { data } = $props();
@@ -168,6 +167,8 @@
 		workflowName = workflow.name;
 	});
 
+	let newKeyData = $state(null);
+
 	let isSynced = $derived(
 		workflow.isPublished &&
 			workflow.lastPublishedAt &&
@@ -254,16 +255,9 @@
 				workflow.name = newName;
 				await reloadWorkflow();
 			}}
-			onOpenRoles={() => {
-				showSettingsModal = false;
-				showRoleModal = true;
-			}}
 		/>
 	{/if}
 
-	{#if showRoleModal}
-		<RoleManagement {workflow} onClose={() => (showRoleModal = false)} />
-	{/if}
 	<SidePanel
 		activeWorkflow={workflow.id ?? ''}
 		userName={user.firstName ?? 'User'}
@@ -318,6 +312,7 @@
 
 							{#if showPublishModal}
 								<Publish
+									bind:newlyCreatedKeyData={newKeyData}
 									{workflow}
 									onClose={() => (showPublishModal = false)}
 									onSubmit={async () => {
@@ -359,6 +354,7 @@
 
 							{#if showPublishModal}
 								<Publish
+									bind:newlyCreatedKeyData={newKeyData}
 									{workflow}
 									onClose={() => (showPublishModal = false)}
 									onSubmit={async () => {
@@ -370,7 +366,7 @@
 					{/if}
 				</div>
 			</div>
-			<div class="flex h-full w-full justify-center gap-2">
+			<div class="flex min-h-0 w-full flex-1 justify-center gap-2">
 				<FlowCanvas
 					{nodes}
 					{edges}
