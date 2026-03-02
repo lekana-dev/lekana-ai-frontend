@@ -9,9 +9,6 @@
 		CircleCheck,
 		CircleX,
 		Lock,
-<<<<<<< Updated upstream
-		LockOpen
-=======
 		LockOpen,
 		CircleAlert,
 		FileJson2,
@@ -19,7 +16,6 @@
 		ToggleLeft,
 		ToggleRight,
 		Braces
->>>>>>> Stashed changes
 	} from 'lucide-svelte';
 	import { toast } from '$lib/toast.svelte';
 
