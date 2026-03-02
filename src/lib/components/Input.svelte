@@ -9,7 +9,17 @@
 		CircleCheck,
 		CircleX,
 		Lock,
+<<<<<<< Updated upstream
 		LockOpen
+=======
+		LockOpen,
+		CircleAlert,
+		FileJson2,
+		ChevronDown,
+		ToggleLeft,
+		ToggleRight,
+		Braces
+>>>>>>> Stashed changes
 	} from 'lucide-svelte';
 	import { toast } from '$lib/toast.svelte';
 
@@ -78,6 +88,74 @@
 			}
 		}
 	});
+
+	// ------------ bodyBuilder helpers ------------
+	let bbPasteText = $state('');
+	let bbShowPreview = $state(false);
+	let bbPasteError = $state('');
+
+	/** Recursively flatten a nested object to dot-notation leaf paths */
+	function flattenJson(obj, prefix = '') {
+		const paths = [];
+		for (const [k, v] of Object.entries(obj)) {
+			const key = prefix ? `${prefix}.${k}` : k;
+			if (Array.isArray(v)) {
+				// treat array items with index notation
+				v.forEach((item, i) => {
+					const arrayKey = `${key}[${i}]`;
+					if (item !== null && typeof item === 'object') {
+						paths.push(...flattenJson(item, arrayKey));
+					} else {
+						paths.push({ path: arrayKey, sampleValue: item });
+					}
+				});
+			} else if (v !== null && typeof v === 'object') {
+				paths.push(...flattenJson(v, key));
+			} else {
+				paths.push({ path: key, sampleValue: v });
+			}
+		}
+		return paths;
+	}
+
+	/** Import rows from a pasted JSON template */
+	function bbImportFromTemplate() {
+		bbPasteError = '';
+		try {
+			const parsed = JSON.parse(bbPasteText);
+			const leaves = flattenJson(parsed);
+			const existing = fieldData.value || [];
+			const existingPaths = new Set(existing.map((r) => r.outputPath));
+			const newRows = leaves
+				.filter((l) => !existingPaths.has(l.path))
+				.map((l) => ({ outputPath: l.path, isStatic: true, staticValue: '', sourceField: '' }));
+			fieldData.value = [...existing, ...newRows];
+			onInput?.({ target: { value: fieldData.value } }, fieldData);
+			bbPasteText = '';
+		} catch {
+			bbPasteError = 'Invalid JSON — please paste valid JSON.';
+		}
+	}
+
+	/** Build a preview object from current rows */
+	function bbBuildPreview(rows) {
+		const result = {};
+		for (const row of rows ?? []) {
+			if (!row.outputPath) continue;
+			const parts = row.outputPath.replace(/\[(\d+)\]/g, '.$1').split('.');
+			let cur = result;
+			for (let i = 0; i < parts.length - 1; i++) {
+				const p = parts[i];
+				if (cur[p] === undefined) cur[p] = isNaN(Number(parts[i + 1])) ? {} : [];
+				cur = cur[p];
+			}
+			const last = parts[parts.length - 1];
+			cur[last] = row.isStatic
+				? (row.staticValue ?? '')
+				: `{{${row.sourceField || 'field'}}}`;
+		}
+		return result;
+	}
 </script>
 
 {#snippet infoTooltip()}
@@ -492,6 +570,175 @@
 		{/if}
 		{#if fieldData.description}
 			<p class="text-xs text-zinc-500">{fieldData.description}</p>
+		{/if}
+	</div>
+{:else if fieldData.type === 'bodyBuilder'}
+	<!--
+		Value shape: [{ path: string, sourceType: 'field'|'static', sourceValue: string }]
+		path       – dot-notation key path in the output JSON, e.g. "clientInfo.name"
+		sourceType – 'field' = map an OCR/extracted field; 'static' = hard-coded value
+		sourceValue– the OCR field name OR the static string value
+	-->
+	<div class="flex flex-col gap-3 text-sm">
+		<!-- Header -->
+		<div class="flex items-center justify-between">
+			<label class="flex items-center gap-1.5 text-zinc-200">
+				{fieldData.label}
+				{@render infoTooltip()}
+			</label>
+			<div class="flex items-center gap-2">
+				<button
+					type="button"
+					onclick={() => (bbShowPreview = !bbShowPreview)}
+					class="flex items-center gap-1.5 rounded-md bg-zinc-800/70 px-3 py-1 text-[11px] text-zinc-300 transition-colors hover:bg-zinc-700"
+				>
+					<Braces size="12" />
+					{bbShowPreview ? 'Hide Preview' : 'Preview JSON'}
+				</button>
+				<button
+					type="button"
+					onclick={() => {
+						fieldData.value = [];
+						onInput?.({ target: { value: fieldData.value } }, fieldData);
+					}}
+					class="rounded-md bg-zinc-800/70 px-3 py-1 text-[11px] text-zinc-400 transition-colors hover:bg-zinc-700 hover:text-red-400"
+				>
+					Clear All
+				</button>
+			</div>
+		</div>
+
+		<!-- JSON Template Paste Area -->
+		<div class="rounded-lg border border-dashed border-zinc-700 bg-zinc-900/40 p-3">
+			<p class="mb-1.5 text-[11px] text-zinc-400">
+				<FileJson2 size="12" class="mr-1 inline-block" />
+				Paste a sample JSON to auto-populate field paths
+			</p>
+			<textarea
+				bind:value={bbPasteText}
+				rows="3"
+				placeholder={'{\n  "companyInfo": { "name": "..." },\n  "lineItems": [{ "code": "..." }]\n}'}
+				class="w-full rounded-md border border-zinc-700 bg-black/60 px-3 py-2 font-mono text-xs text-zinc-200 placeholder:text-zinc-600 focus:border-green-600 focus:outline-none"
+			></textarea>
+			{#if bbPasteError}
+				<p class="mt-1 text-[11px] text-red-400">{bbPasteError}</p>
+			{/if}
+			<button
+				type="button"
+				disabled={!bbPasteText.trim()}
+				onclick={bbImportFromTemplate}
+				class="mt-2 flex items-center gap-1.5 rounded-md bg-green-700/20 px-3 py-1 text-[11px] text-green-400 transition-colors hover:bg-green-700/40 disabled:cursor-not-allowed disabled:opacity-40"
+			>
+				<Plus size="12" /> Import Paths from JSON
+			</button>
+		</div>
+
+		<!-- Column headers -->
+		{#if (fieldData.value?.length ?? 0) > 0}
+			<div class="grid grid-cols-[2fr_80px_2fr_28px] gap-2 px-1">
+				<span class="text-[10px] uppercase tracking-wide text-zinc-500">JSON Path</span>
+				<span class="text-[10px] uppercase tracking-wide text-zinc-500">Source</span>
+				<span class="text-[10px] uppercase tracking-wide text-zinc-500">Value / Field</span>
+				<span></span>
+			</div>
+		{/if}
+
+		<!-- Mapping Rows -->
+		{#each fieldData.value ?? [] as row, index (index)}
+			<div class="grid grid-cols-[2fr_80px_2fr_28px] items-center gap-2">
+				<!-- Path input -->
+				<input
+					type="text"
+					bind:value={row.outputPath}
+					placeholder="e.g. clientInfo.name"
+					class="rounded-md border border-zinc-700 bg-black/50 px-2.5 py-1.5 font-mono text-xs text-zinc-200 placeholder:text-zinc-600 focus:border-green-600 focus:outline-none"
+					oninput={() => onInput?.({ target: { value: fieldData.value } }, fieldData)}
+				/>
+
+				<!-- Source type toggle: Field | Static -->
+				<button
+					type="button"
+					onclick={() => {
+						row.isStatic = !row.isStatic;
+						row.sourceField = '';
+						row.staticValue = '';
+						onInput?.({ target: { value: fieldData.value } }, fieldData);
+					}}
+					class="flex items-center justify-center gap-1 rounded-md border px-2 py-1.5 text-[10px] font-medium transition-colors
+					{!row.isStatic
+						? 'border-green-700/60 bg-green-900/20 text-green-400'
+						: 'border-zinc-700 bg-zinc-800/40 text-zinc-400 hover:bg-zinc-700/50'}"
+				>
+					{row.isStatic ? 'Static' : 'Field'}
+				</button>
+
+				<!-- Value: dropdown of extracted fields OR free text -->
+				{#if !row.isStatic}
+					{#if extractedFields && extractedFields.length > 0}
+						<select
+							bind:value={row.sourceField}
+							class="rounded-md border border-zinc-700 bg-black px-2.5 py-1.5 text-xs text-white focus:border-green-600 focus:outline-none"
+							onchange={() => onInput?.({ target: { value: fieldData.value } }, fieldData)}
+						>
+							<option value="">-- Select OCR Field --</option>
+							{#each extractedFields as field}
+								<option value={field}>{field}</option>
+							{/each}
+						</select>
+					{:else}
+						<input
+							type="text"
+							bind:value={row.sourceField}
+							placeholder="OCR field name"
+							class="rounded-md border border-zinc-700 bg-black/50 px-2.5 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-600 focus:border-green-600 focus:outline-none"
+							oninput={() => onInput?.({ target: { value: fieldData.value } }, fieldData)}
+						/>
+					{/if}
+				{:else}
+					<input
+						type="text"
+						bind:value={row.staticValue}
+						placeholder="Static value"
+						class="rounded-md border border-zinc-700 bg-black/50 px-2.5 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-600 focus:border-green-600 focus:outline-none"
+						oninput={() => onInput?.({ target: { value: fieldData.value } }, fieldData)}
+					/>
+				{/if}
+
+				<!-- Remove row -->
+				<button
+					type="button"
+					onclick={() => {
+						fieldData.value = fieldData.value.filter((_, i) => i !== index);
+						onInput?.({ target: { value: fieldData.value } }, fieldData);
+					}}
+					class="flex h-7 w-7 items-center justify-center rounded text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-red-400"
+				>
+					<Minus size="14" />
+				</button>
+			</div>
+		{/each}
+
+		<!-- Add manual row -->
+		<button
+			type="button"
+			onclick={() => {
+				if (!fieldData.value) fieldData.value = [];
+				fieldData.value.push({ outputPath: '', isStatic: true, staticValue: '', sourceField: '' });
+				onInput?.({ target: { value: fieldData.value } }, fieldData);
+			}}
+			class="flex w-fit items-center gap-1.5 rounded-md border border-dashed border-zinc-700 px-3 py-1.5 text-[11px] text-zinc-400 transition-colors hover:border-green-700 hover:text-green-400"
+		>
+			<Plus size="12" /> Add Field Mapping
+		</button>
+
+		<!-- Live JSON Preview -->
+		{#if bbShowPreview}
+			{@const preview = bbBuildPreview(fieldData.value)}
+			<div class="rounded-lg border border-zinc-700/60 bg-zinc-950 p-3">
+				<p class="mb-2 text-[10px] uppercase tracking-wider text-zinc-500">Preview Output</p>
+				<pre
+					class="overflow-x-auto text-[11px] text-green-300">{JSON.stringify(preview, null, 2)}</pre>
+			</div>
 		{/if}
 	</div>
 {/if}
