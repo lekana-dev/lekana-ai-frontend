@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
 	import {
 		PanelLeftClose,
 		Network,
@@ -13,19 +12,22 @@
 		CopyPlus,
 		Settings2,
 		LifeBuoy,
-		MessageSquare
+		MessageSquare,
+		Zap,
+		HardDrive
 	} from 'lucide-svelte';
 	import { onMount } from 'svelte';
 	import { SignedIn, UserButton } from 'svelte-clerk';
 	import { toast } from '$lib/toast.svelte';
 	import LoadingOverlay from './LoadingOverlay.svelte';
 	import SupportModal from './SupportModal.svelte';
+	import BetaAnnouncementModal from './BetaAnnouncementModal.svelte';
 
 	let {
 		userName,
 		activeWorkflow,
 		activeWorkflowName
-	}: { userName: string; activeWorkflow?: string; activeWorkflowName?: string } = $props();
+	}: { userName: string; activeWorkflow: string; activeWorkflowName?: string } = $props();
 
 	$effect(() => {
 		if (activeWorkflowName && workflows.length > 0) {
@@ -47,10 +49,58 @@
 	let showSupportModal = $state(false);
 	let loadingTitle = $state('Creating Workflow');
 	let loadingMessage = $state('Sit back. We are getting your workspace ready...');
+	let showBetaModal = $state(false);
+
+	function getCookie(name: string) {
+		const value = `; ${document.cookie}`;
+		const parts = value.split(`; ${name}=`);
+		if (parts.length === 2) return parts.pop()?.split(';').shift();
+	}
+
+	function setCookie(name: string, value: string, days: number) {
+		const date = new Date();
+		date.setTime(date.getTime() + days * 24 * 60 * 60 * 1000);
+		document.cookie = `${name}=${value};expires=${date.toUTCString()};path=/`;
+	}
+
+	interface UsageData {
+		storage: {
+			used: number;
+			limit: number;
+			usedFormatted: string;
+			limitFormatted: string;
+			percentage: number;
+		};
+		tokens: {
+			used: number;
+			limit: number | null;
+		};
+	}
+
+	let usage = $state<UsageData | null>(null);
 
 	onMount(() => {
 		loadWorkflows();
+		loadUsage();
+
+		// Check for beta announcement cookie
+		if (!getCookie('lekana_beta_seen')) {
+			setTimeout(() => {
+				showBetaModal = true;
+			}, 1000);
+		}
 	});
+
+	async function loadUsage() {
+		try {
+			const res = await fetch('/api/usage');
+			if (res.ok) {
+				usage = await res.json();
+			}
+		} catch (e) {
+			console.error('Failed to fetch usage:', e);
+		}
+	}
 
 	async function loadWorkflows() {
 		workflowsLoading = true;
@@ -149,7 +199,7 @@
 		: 'w-56'} z-0 flex-col justify-between bg-zinc-900 px-2 py-4 backdrop-blur-md transition-[width] duration-300"
 	aria-label="Workflow sidebar"
 >
-	<div class="flex flex-1 flex-col gap-3 overflow-hidden">
+	<div class="flex h-full flex-col gap-3">
 		<header class="flex items-center {panelCollapsed ? 'justify-center' : 'justify-between'} group">
 			<!-- Logo / brand -->
 			<a
@@ -178,23 +228,6 @@
 			</button>
 		</header>
 
-		<div
-			class="group flex w-full items-center gap-3 rounded-md text-zinc-300 {panelCollapsed
-				? 'justify-center  py-2'
-				: 'p-2'} "
-		>
-			<SignedIn>
-				<UserButton />
-			</SignedIn>
-			<div class="flex flex-col gap-1 {panelCollapsed ? 'hidden' : ''}">
-				<p class="flex items-center gap-1 truncate text-xs">Lekana Beta</p>
-				<span class="w-fit rounded-full text-[10px] font-medium text-green-500">Free</span>
-				<!-- <p class="flex truncate text-[10px] {panelCollapsed ? 'hidden' : ''}">
-					<span class="text-zinc-400">{userName}</span>
-				</p> -->
-			</div>
-		</div>
-
 		<!-- Workflows section -->
 		<button
 			aria-label="New workflow"
@@ -213,7 +246,7 @@
 			</div>
 		</button>
 		{#if workflowsLoading}
-			<section class="flex h-full w-full flex-col gap-3 px-1">
+			<section class="flex h-full w-full {panelCollapsed ? '' : 'min-w-52'} flex-col gap-3 px-1">
 				<div class="flex items-center gap-2 p-1">
 					<div class="h-6 w-6 animate-pulse rounded-md bg-white/5"></div>
 					<div
@@ -229,7 +262,7 @@
 				{/if}
 			</section>
 		{:else if workflows.length > 0}
-			<section class="flex h-full w-full flex-col gap-3 px-1">
+			<section class="flex h-full w-full {panelCollapsed ? '' : 'min-w-52'} flex-col gap-3 px-1">
 				<!-- New Workflow button -->
 				<button
 					aria-label="Collapse workflows"
@@ -264,7 +297,7 @@
 					<!-- Workflows list -->
 					<nav
 						onscroll={() => (openMenuId = null)}
-						class="flex max-h-[calc(100vh-250px)] w-full flex-col gap-1 overflow-y-auto pr-1 select-none"
+						class="dark-scroll flex max-h-[calc(100vh-300px)] w-full flex-col gap-1 overflow-y-auto pr-1 pb-4 select-none"
 						aria-label="Workflow list"
 					>
 						{#each workflows as workflow (workflow.id)}
@@ -279,7 +312,7 @@
 									}}
 									class="group relative flex w-full items-center justify-between gap-2 rounded-lg p-3 text-xs focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none
 						{activeWorkflow === workflow.id
-										? 'bg-green-700 font-semibold text-white'
+										? 'bg-white/10 font-medium text-green-400'
 										: 'font-normal text-white/70 hover:bg-white/5'}"
 								>
 									<p class="truncate">{workflow.name}</p>
@@ -295,13 +328,10 @@
 											menuWorkflow = workflow;
 											openMenuId = openMenuId === workflow.id ? null : workflow.id;
 										}}
-										class="absolute right-1 z-20 items-center justify-center rounded-md p-2 transition-colors duration-300 {openMenuId ===
+										class="absolute right-1 z-20 items-center justify-center rounded-md bg-zinc-800 p-2 text-white transition-colors duration-300 hover:bg-zinc-900 {openMenuId ===
 										workflow.id
 											? 'flex'
-											: 'hidden group-hover:flex'} 
-				{activeWorkflow === workflow.id
-											? 'bg-zinc-800 hover:bg-zinc-900'
-											: 'bg-zinc-800 hover:bg-zinc-900'}"
+											: 'hidden group-hover:flex'} "
 									>
 										<EllipsisVertical class="h-4 w-4" />
 									</button>
@@ -314,6 +344,79 @@
 		{/if}
 	</div>
 
+	<div class="group relative mb-4 w-full">
+		{#if usage && !panelCollapsed}
+			<div
+				class="pointer-events-none absolute bottom-full left-0 z-50 mb-2 w-full px-2 opacity-0 transition-opacity duration-300 group-hover:pointer-events-auto group-hover:opacity-100"
+			>
+				<div
+					class="flex flex-col gap-3 rounded-xl border border-white/5 bg-zinc-900/95 p-3 shadow-xl backdrop-blur-md"
+				>
+					<!-- Tokens -->
+					<div class="flex flex-col gap-1.5">
+						<div class="flex items-center justify-between text-[10px]">
+							<div class="flex items-center gap-1.5 font-medium text-zinc-300">
+								<Zap class="h-3 w-3 text-green-400" />
+								<span>Tokens</span>
+							</div>
+							<span class="text-zinc-500">
+								{usage.tokens.used.toLocaleString()} <span class="text-zinc-600">/</span>
+								{usage.tokens.limit?.toLocaleString() ?? '∞'}
+							</span>
+						</div>
+					</div>
+
+					<!-- Storage (Text Only) -->
+					<div class="flex items-center justify-between border-t border-white/5 pt-2 text-[10px]">
+						<div class="flex items-center gap-1.5 font-medium text-zinc-400">
+							<HardDrive class="h-3 w-3 text-blue-400" />
+							<span>Storage</span>
+						</div>
+						<span class="text-zinc-500">
+							{usage.storage.usedFormatted} <span class="text-zinc-600">/</span>
+							{usage.storage.limitFormatted}
+						</span>
+					</div>
+				</div>
+			</div>
+		{/if}
+
+		<!-- User Info -->
+		<div
+			class="flex w-full items-center gap-3 rounded-md text-zinc-300 {panelCollapsed
+				? 'justify-center  py-2'
+				: 'p-2'} "
+		>
+			<SignedIn>
+				<UserButton />
+			</SignedIn>
+			<div class="flex w-full flex-col gap-2 {panelCollapsed ? 'hidden' : ''}">
+				<div class="flex gap-1">
+					<p class="flex items-center gap-1 truncate text-xs">Lekana</p>
+					<span class="w-fit rounded-full text-[10px] font-medium text-green-500">Beta</span>
+					<!-- <p class="flex truncate text-[10px] {panelCollapsed ? 'hidden' : ''}">
+						<span class="text-zinc-400">{userName}</span>
+					</p> -->
+				</div>
+				{#if usage}
+					{#if usage.tokens.limit}
+						{@const percent = Math.min((usage.tokens.used / usage.tokens.limit) * 100, 100)}
+						<div class="h-1.5 w-full overflow-hidden rounded-full bg-zinc-800">
+							<div
+								class=" h-full rounded-full bg-linear-to-r from-green-500 to-emerald-400 transition-all duration-500"
+								style="width: {percent}%"
+							>
+								<span class="text-[10px] text-zinc-500">
+									{usage.tokens.used.toLocaleString()} <span class="text-zinc-600">/</span>
+									{usage.tokens.limit?.toLocaleString() ?? '∞'}
+								</span>
+							</div>
+						</div>
+					{/if}
+				{/if}
+			</div>
+		</div>
+	</div>
 	<!-- Support Button -->
 	<button
 		type="button"
@@ -370,4 +473,25 @@
 	/>
 {/if}
 
+{#if showBetaModal}
+	<BetaAnnouncementModal
+		onClose={() => {
+			showBetaModal = false;
+			setCookie('lekana_beta_seen', 'true', 7);
+		}}
+		onFeedback={() => {
+			showBetaModal = false;
+			setCookie('lekana_beta_seen', 'true', 7);
+			showSupportModal = true;
+		}}
+	/>
+{/if}
+
 <LoadingOverlay show={isActionLoading} title={loadingTitle} message={loadingMessage} />
+
+<style>
+	.dark-scroll {
+		scrollbar-width: thin;
+		scrollbar-color: gray transparent;
+	}
+</style>

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import SidePanel from '$lib/components/SidePanel.svelte';
+	import SupportModal from '$lib/components/SupportModal.svelte';
 	import type { User } from 'svelte-clerk/server';
 
 	let { data } = $props();
@@ -25,14 +26,16 @@
 		Layers,
 		RefreshCcwDot,
 		FileText,
-		HardDrive,
-		Zap,
 		ExternalLink,
-		Loader2
+		Loader2,
+		Image,
+		File,
+		Workflow,
+		Flag
 	} from 'lucide-svelte';
 	import { toast } from '$lib/toast.svelte';
+	import JsonViewer from '$lib/components/JsonViewer.svelte';
 
-	// Existing execution state
 	let executions = $state<any[]>([]);
 	let loading = $state(true);
 	let selectedExecutionId = $state<string | null>(null);
@@ -55,25 +58,35 @@
 		};
 	}
 
-	interface UsageData {
-		storage: {
-			used: number;
-			limit: number;
-			usedFormatted: string;
-			limitFormatted: string;
-			percentage: number;
-		};
-		tokens: {
-			used: number;
-			limit: number | null;
-		};
-	}
-
 	let documents = $state<Document[]>([]);
 	let documentsLoading = $state(false);
-	let usage = $state<UsageData | null>(null);
+
 	let openingDocId = $state<string | null>(null);
 	let showDocuments = $state(false);
+
+	// Support modal state for error reporting
+	let showSupportModal = $state(false);
+	let supportExecutionId = $state<string | null>(null);
+	let supportNodeExecutionId = $state<string | null>(null);
+	let supportErrorDetails = $state<any>(null);
+
+	function openSupportModalWithError(
+		executionId: string,
+		nodeExecutionId?: string | null,
+		errorDetails?: any
+	) {
+		supportExecutionId = executionId;
+		supportNodeExecutionId = nodeExecutionId || null;
+		supportErrorDetails = errorDetails || null;
+		showSupportModal = true;
+	}
+
+	function closeSupportModal() {
+		showSupportModal = false;
+		supportExecutionId = null;
+		supportNodeExecutionId = null;
+		supportErrorDetails = null;
+	}
 
 	let selectedExecution = $derived(executions.find((e) => e.id === selectedExecutionId) || null);
 
@@ -85,8 +98,8 @@
 		selectedExecutionSteps.find((s: any) => s.id === selectedStepId) || null
 	);
 
-	let filteredExecutions = $derived(executions.filter((e) => e.workflowId === workflow.id));
-	// let filteredExecutions = $derived(executions);
+	// let filteredExecutions = $derived(executions.filter((e) => e.workflowId === workflow.id));
+	let filteredExecutions = $derived(executions);
 
 	let stats = $derived.by(() => {
 		if (filteredExecutions.length === 0)
@@ -105,22 +118,223 @@
 			total,
 			completed,
 			failed: total - completed,
+			// Note: If execution objects in the list don't have a 'success' boolean,
+			// we stick to COMPLETED for this overview, but individual nodes show failures.
 			successRate: Math.round((completed / total) * 100),
 			avgDuration: (avgDuration / 1000).toFixed(2)
 		};
 	});
 
+	// SSE connection for real-time updates
+	let eventSource: EventSource | null = null;
+
 	onMount(async () => {
-		await Promise.all([loadExecutions(), loadDocuments(), loadUsage()]);
+		await Promise.all([loadExecutions(), loadDocuments()]);
+
+		// Connect to SSE for real-time updates
+		connectSSE();
 	});
+
+	import { onDestroy } from 'svelte';
+
+	onDestroy(() => {
+		// Clean up SSE connection
+		if (eventSource) {
+			eventSource.close();
+			eventSource = null;
+		}
+	});
+
+	function connectSSE() {
+		if (!workflow.id || eventSource) return;
+
+		const sseUrl = `/rime/workflows/${workflow.id}/events`;
+		// console.log('[Monitor] Connecting to SSE:', sseUrl);
+
+		eventSource = new EventSource(sseUrl);
+
+		eventSource.onopen = () => {
+			// console.log('[Monitor] SSE connected');
+		};
+
+		eventSource.onerror = (err) => {
+			console.error('[Monitor] SSE error:', err);
+			// Reconnect after 5 seconds if disconnected
+			setTimeout(() => {
+				if (eventSource?.readyState === EventSource.CLOSED) {
+					eventSource = null;
+					connectSSE();
+				}
+			}, 5000);
+		};
+
+		// Handle execution events
+		eventSource.addEventListener('execution:started', (event) => {
+			const { data } = JSON.parse(event.data);
+			// console.log('[Monitor] Execution started:', data);
+			handleExecutionStarted(data);
+		});
+
+		eventSource.addEventListener('execution:updated', (event) => {
+			const { data } = JSON.parse(event.data);
+			// console.log('[Monitor] Execution updated:', data);
+			handleExecutionUpdated(data);
+		});
+
+		// Handle node events
+		eventSource.addEventListener('node:started', (event) => {
+			const { data } = JSON.parse(event.data);
+			// console.log('[Monitor] Node started:', data);
+			handleNodeUpdate(data, 'RUNNING');
+		});
+
+		eventSource.addEventListener('node:completed', (event) => {
+			const { data } = JSON.parse(event.data);
+			// console.log('[Monitor] Node completed:', data);
+			handleNodeUpdate(data, 'COMPLETED');
+		});
+
+		eventSource.addEventListener('node:failed', (event) => {
+			const { data } = JSON.parse(event.data);
+			// console.log('[Monitor] Node failed:', data);
+			handleNodeUpdate(data, 'FAILED');
+		});
+
+		eventSource.addEventListener('node:skipped', (event) => {
+			const { data } = JSON.parse(event.data);
+			// console.log('[Monitor] Node skipped:', data);
+			handleNodeUpdate(data, 'SKIPPED');
+		});
+
+		eventSource.addEventListener('documents:skipped', (event) => {
+			const { data } = JSON.parse(event.data);
+			console.log('[Monitor] Documents skipped:', data);
+			handleDocumentsSkipped(data);
+		});
+	}
+
+	function handleExecutionStarted(data: any) {
+		// Add new execution to the beginning of the list
+		const newExecution = {
+			id: data.id,
+			workflowId: workflow.id,
+			workflowName: data.workflowName,
+			status: data.status,
+			startedAt: data.startedAt,
+			completedAt: null
+		};
+		executions = [newExecution, ...executions];
+
+		// Initialize execution details for the new execution
+		executionDetails[data.id] = { nodeExecutions: [] };
+	}
+
+	function handleExecutionUpdated(data: any) {
+		// Update existing execution in the list
+		executions = executions.map((e) => {
+			if (e.id === data.id) {
+				return { ...e, status: data.status, completedAt: data.completedAt };
+			}
+			return e;
+		});
+	}
+
+	function handleDocumentsSkipped(data: any) {
+		const { executionId, skippedFiles } = data;
+
+		// Ensure we have details for this execution
+		if (!executionDetails[executionId]) {
+			executionDetails[executionId] = { nodeExecutions: [], skippedFiles: [] };
+		}
+
+		// Store skipped files in execution details
+		executionDetails[executionId].skippedFiles = skippedFiles;
+
+		// Trigger reactivity
+		executionDetails = { ...executionDetails };
+	}
+
+	function handleNodeUpdate(data: any, status: string) {
+		const {
+			executionId,
+			nodeId,
+			actionName,
+			stepName,
+			executionOrder,
+			input,
+			output,
+			error,
+			completedAt,
+			reason,
+			startedAt
+		} = data;
+
+		// Ensure we have details for this execution
+		if (!executionDetails[executionId]) {
+			executionDetails[executionId] = { nodeExecutions: [] };
+		}
+
+		const details = executionDetails[executionId];
+		const existingIndex = details.nodeExecutions?.findIndex((n: any) => n.nodeId === nodeId);
+		const existingNode = existingIndex >= 0 ? details.nodeExecutions[existingIndex] : null;
+
+		// Determine startedAt - use from event if provided, else existing, else now
+		const nodeStartedAt = startedAt || existingNode?.startedAt || new Date().toISOString();
+
+		// Determine completedAt - only set for completed/failed/skipped statuses
+		const nodeCompletedAt =
+			status === 'COMPLETED' || status === 'FAILED' || status === 'SKIPPED'
+				? completedAt || new Date().toISOString()
+				: existingNode?.completedAt;
+
+		const nodeData = {
+			id: nodeId,
+			nodeId,
+			actionName,
+			stepName,
+			executionOrder,
+			status,
+			input: input || existingNode?.input,
+			output: output ? { data: output, success: status === 'COMPLETED' } : existingNode?.output,
+			error: error || reason || existingNode?.error,
+			startedAt: nodeStartedAt,
+			completedAt: nodeCompletedAt
+		};
+
+		if (existingIndex >= 0) {
+			// Update existing node - merge with existing data
+			details.nodeExecutions[existingIndex] = { ...existingNode, ...nodeData };
+		} else {
+			// Add new node
+			details.nodeExecutions = [...(details.nodeExecutions || []), nodeData];
+			// Sort by execution order
+			details.nodeExecutions.sort((a: any, b: any) => a.executionOrder - b.executionOrder);
+		}
+
+		// Trigger reactivity
+		executionDetails = { ...executionDetails };
+
+		// Auto-select first step if this is the currently selected execution
+		if (
+			selectedExecutionId === executionId &&
+			!selectedStepId &&
+			details.nodeExecutions?.length > 0
+		) {
+			selectedStepId = details.nodeExecutions[0].id;
+		}
+	}
 
 	async function loadExecutions() {
 		loading = true;
+		const id = selectedExecutionId;
+		selectedExecutionId = null;
 		try {
-			// Use workflow-specific endpoint for secure access control
 			const res = await fetch(`/rime/workflows/${workflow.id}/executions?limit=50&offset=0`);
 			const data = await res.json();
 			executions = data;
+			if (id) {
+				selectExecution(id);
+			}
 		} catch (e) {
 			console.error('Failed to fetch executions:', e);
 			toast.error('Failed to load executions. Please try again in a moment.');
@@ -133,7 +347,7 @@
 	async function loadDocuments() {
 		documentsLoading = true;
 		try {
-			const res = await fetch(`/api/runtime/documents/by-workflow-id/${workflow.id}`);
+			const res = await fetch(`/rime/documents/by-workflow-id/${workflow.id}`);
 			if (res.ok) {
 				const data = await res.json();
 				documents = data.documents || [];
@@ -145,38 +359,18 @@
 		}
 	}
 
-	async function loadUsage() {
-		try {
-			const res = await fetch('/api/usage');
-			if (res.ok) {
-				usage = await res.json();
-			}
-		} catch (e) {
-			console.error('Failed to fetch usage:', e);
-		}
-	}
-
 	async function openDocument(doc: Document) {
 		openingDocId = doc.id;
 		try {
-			const res = await fetch(`/api/runtime/documents/${doc.id}/url`);
-			if (!res.ok) throw new Error('Failed to get document URL');
-			const data = await res.json();
-			window.open(data.url, '_blank');
+			// Open the document through the proxy which handles auth and decryption
+			// This fetches the decrypted content directly via runtime -> upload service
+			window.open(`/rime/documents/${doc.id}/content`, '_blank');
 		} catch (e: any) {
 			console.error('Error opening document:', e);
-			alert('Failed to open document: ' + e.message);
+			toast.error('Failed to open document. Please try again in a moment.');
 		} finally {
 			openingDocId = null;
 		}
-	}
-
-	function getFileIcon(mimeType: string): string {
-		if (mimeType.includes('pdf')) return '📄';
-		if (mimeType.includes('image')) return '🖼️';
-		if (mimeType.includes('word') || mimeType.includes('document')) return '📝';
-		if (mimeType.includes('sheet') || mimeType.includes('excel')) return '📊';
-		return '📁';
 	}
 
 	async function loadDetails(id: string) {
@@ -222,7 +416,7 @@
 </svelte:head>
 
 {#snippet CollapsibleJson(data: any)}
-	<details class="group">
+	<details class="group" open>
 		<summary
 			class="flex cursor-pointer list-none items-center gap-2 py-1 text-xs font-medium text-zinc-500 transition-colors hover:text-zinc-300"
 		>
@@ -230,14 +424,19 @@
 			<span>{Object.keys(data || {}).length} fields</span>
 		</summary>
 		<div class="mt-2 overflow-hidden rounded-xl border border-white/5 bg-black/20 p-4">
-			<pre
-				class="dark-scroll overflow-x-auto font-mono text-xs leading-relaxed text-zinc-400">{JSON.stringify(
-					data,
-					null,
-					2
-				)}</pre>
+			<JsonViewer {data} isRoot={true} />
 		</div>
 	</details>
+{/snippet}
+
+{#snippet FileIconItem(mimeType: string)}
+	{#if mimeType.includes('pdf')}
+		<FileText class="h-4 w-4 text-red-400" />
+	{:else if mimeType.includes('image')}
+		<Image class="h-4 w-4 text-purple-400" />
+	{:else}
+		<File class="h-4 w-4 text-zinc-500" />
+	{/if}
 {/snippet}
 
 <main class="flex h-screen w-screen overflow-hidden bg-zinc-900">
@@ -277,7 +476,7 @@
 					</a>
 					{#if workflow.isPublished}
 						<a
-							href="{workflow.id}/run"
+							href="run"
 							target="_blank"
 							class="flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-white transition-all duration-300 hover:bg-white/10 active:scale-95"
 						>
@@ -286,8 +485,7 @@
 						</a>
 					{/if}
 					<a
-						href="/docs"
-						target="_blank"
+						href="/w/{workflow.id}"
 						class="flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-white transition-all duration-300 hover:bg-white/10 active:scale-95"
 					>
 						<CornerRightUp class="h-3.5 w-3.5" />
@@ -319,65 +517,22 @@
 							</div>
 
 							<!-- User Usage Stats -->
-							{#if usage}
-								<div class="mt-3 grid grid-cols-2 gap-2">
-									<!-- Storage -->
-									<div class="rounded-lg bg-white/2 p-2">
-										<div class="flex items-center gap-1.5 mb-1">
-											<HardDrive class="h-3 w-3 text-blue-400" />
-											<span class="text-[10px] font-bold text-zinc-500 uppercase">Storage</span>
-										</div>
-										<p class="text-xs font-medium text-white truncate">
-											{usage.storage.usedFormatted}
-											<span class="text-zinc-500">/ {usage.storage.limitFormatted}</span>
-										</p>
-										<div class="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-zinc-800">
-											<div
-												class="h-full rounded-full transition-all duration-500"
-												class:bg-blue-500={usage.storage.percentage < 80}
-												class:bg-yellow-500={usage.storage.percentage >= 80 && usage.storage.percentage < 95}
-												class:bg-red-500={usage.storage.percentage >= 95}
-												style="width: {Math.min(usage.storage.percentage, 100)}%"
-											></div>
-										</div>
-									</div>
-									<!-- Tokens -->
-									<div class="rounded-lg bg-white/2 p-2">
-										<div class="flex items-center gap-1.5 mb-1">
-											<Zap class="h-3 w-3 text-green-400" />
-											<span class="text-[10px] font-bold text-zinc-500 uppercase">AI Tokens</span>
-										</div>
-										<p class="text-xs font-medium text-white">
-											{usage.tokens.used.toLocaleString()}
-											{#if usage.tokens.limit}
-												<span class="text-zinc-500">/ {usage.tokens.limit.toLocaleString()}</span>
-											{/if}
-										</p>
-										{#if usage.tokens.limit}
-											{@const tokenPercentage = Math.round((usage.tokens.used / usage.tokens.limit) * 100)}
-											<div class="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-zinc-800">
-												<div
-													class="h-full rounded-full bg-green-500 transition-all duration-500"
-													style="width: {Math.min(tokenPercentage, 100)}%"
-												></div>
-											</div>
-										{:else}
-											<p class="text-[10px] text-zinc-600 mt-1">No limit</p>
-										{/if}
-									</div>
-								</div>
-							{/if}
 						</div>
 
 						<!-- Execution Log Header -->
 						<div
 							class="sticky top-0 z-10 flex items-center justify-between bg-zinc-950/80 px-4 py-3"
 						>
-							<h3 class="text-xs font-bold tracking-widest text-zinc-500 uppercase">
-								Execution Log
-							</h3>
+							<div class="flex items-center gap-2">
+								<Workflow class="h-3.5 w-3.5 text-zinc-500" />
+								<h3 class="rounded-lg text-xs font-bold tracking-widest text-zinc-500 uppercase">
+									Execution Log
+								</h3>
+							</div>
 							<button
-								onclick={() => loadExecutions()}
+								onclick={() => {
+									(loadExecutions(), loadDocuments());
+								}}
 								class="text-zinc-500 transition-colors hover:text-white"
 							>
 								<RefreshCcw class="h-3 w-3 {loading ? 'animate-spin' : ''}" />
@@ -415,7 +570,11 @@
 												<div
 													class="h-1.5 w-1.5 rounded-full {execution.status === 'COMPLETED'
 														? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]'
-														: 'bg-red-500'}"
+														: execution.status === 'RUNNING'
+															? 'animate-pulse bg-blue-400'
+															: execution.status === 'FAILED'
+																? 'bg-red-500'
+																: 'bg-zinc-500'}"
 												></div>
 												<span
 													class="font-mono text-xs font-bold {selectedExecutionId === execution.id
@@ -448,25 +607,31 @@
 							<button
 								type="button"
 								onclick={() => (showDocuments = !showDocuments)}
-								class="relative z-20 flex w-full cursor-pointer items-center justify-between bg-zinc-950/80 px-4 py-3 hover:bg-zinc-900/80"
+								class="relative z-20 flex w-full cursor-pointer items-center justify-between rounded-lg bg-zinc-950/80 px-4 py-3 hover:bg-zinc-900/80"
 							>
 								<div class="flex items-center gap-2">
 									<FileText class="h-3.5 w-3.5 text-zinc-500" />
 									<h3 class="text-xs font-bold tracking-widest text-zinc-500 uppercase">
 										Documents
 									</h3>
-									<span class="rounded-full bg-white/5 px-2 py-0.5 text-[10px] font-bold text-zinc-400">
+									<span
+										class="rounded-full bg-white/5 px-2 py-0.5 text-[10px] font-bold text-zinc-400"
+									>
 										{documents.length}
 									</span>
 								</div>
-								<ChevronDown class="h-3 w-3 text-zinc-500 transition-transform {showDocuments ? 'rotate-180' : ''}" />
+								<ChevronDown
+									class="h-3 w-3 text-zinc-500 transition-transform {showDocuments
+										? 'rotate-180'
+										: ''}"
+								/>
 							</button>
-							
+
 							{#if showDocuments}
 								<div class="dark-scroll max-h-48 space-y-1 overflow-y-auto p-2">
 									{#if documentsLoading}
-										{#each Array(3) as _}
-											<div class="animate-pulse rounded-lg bg-white/2 p-2.5">
+										{#each Array(2) as _}
+											<div class="animate-pulse rounded-lg bg-white/2 p-2.5 py-4">
 												<div class="h-3 w-24 rounded bg-white/10"></div>
 											</div>
 										{/each}
@@ -477,9 +642,11 @@
 										</div>
 									{:else}
 										{#each documents as doc}
-											<div class="flex items-center justify-between rounded-lg bg-white/2 p-2.5 transition-colors hover:bg-white/5">
-												<div class="flex items-center gap-2 min-w-0 flex-1">
-													<span class="text-sm shrink-0">{getFileIcon(doc.mimeType)}</span>
+											<div
+												class="flex items-center justify-between rounded-lg bg-white/2 p-2.5 transition-colors hover:bg-white/5"
+											>
+												<div class="flex min-w-0 flex-1 items-center gap-2">
+													<span class="shrink-0 text-sm">{@render FileIconItem(doc.mimeType)}</span>
 													<div class="min-w-0 flex-1">
 														<p class="truncate text-xs font-medium text-zinc-300">{doc.filename}</p>
 														<p class="text-[10px] text-zinc-600">{doc.sizeFormatted}</p>
@@ -492,7 +659,7 @@
 														openDocument(doc);
 													}}
 													disabled={openingDocId === doc.id}
-													class="relative z-30 ml-2 shrink-0 cursor-pointer rounded-md bg-zinc-600 px-2 py-1.5 text-zinc-200 transition-all hover:bg-green-600 hover:text-white disabled:opacity-50"
+													class="relative z-30 ml-2 shrink-0 cursor-pointer rounded-md px-2 py-1.5 text-zinc-200 transition-all hover:text-green-400 disabled:opacity-50"
 												>
 													{#if openingDocId === doc.id}
 														<Loader2 class="h-3 w-3 animate-spin" />
@@ -545,7 +712,7 @@
 											<h2 class="flex items-center gap-2 text-base font-bold text-white">
 												Execution {execution.id.slice(0, 8)}
 												{#if execution.status === 'COMPLETED'}
-													<CircleCheck  class="h-4 w-4 text-green-500" />
+													<CircleCheck class="h-4 w-4 text-green-500" />
 												{:else}
 													<CircleAlert class="h-4 w-4 text-red-500" />
 												{/if}
@@ -585,6 +752,34 @@
 								{/if}
 							</div>
 
+							<!-- Skipped Files Warning Section -->
+							{#if details?.skippedFiles?.length > 0}
+								<div class="border-t border-amber-500/20 bg-amber-500/5 px-4 py-3">
+									<div class="mb-2 flex items-center gap-2">
+										<CircleAlert class="h-4 w-4 text-amber-400" />
+										<span class="text-xs font-bold text-amber-400 uppercase">
+											{details.skippedFiles.length} File(s) Skipped
+										</span>
+									</div>
+									<div class="flex flex-wrap gap-2">
+										{#each details.skippedFiles as skipped}
+											<div
+												class="flex items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-1.5"
+												title={skipped.reason}
+											>
+												<FileText class="h-3.5 w-3.5 text-amber-400" />
+												<span class="max-w-[120px] truncate text-xs text-amber-300"
+													>{skipped.filename}</span
+												>
+											</div>
+										{/each}
+									</div>
+									<p class="mt-2 text-[10px] text-amber-500/70">
+										Hover over files to see skip reason
+									</p>
+								</div>
+							{/if}
+
 							<!-- Details Split: Steps & Step Info -->
 							<div class="flex flex-1 overflow-hidden">
 								<!-- Steps Timeline -->
@@ -608,52 +803,57 @@
 												</div>
 											{/each}
 										{:else}
-											{#each selectedExecutionSteps as step}
+											{#each selectedExecutionSteps as step, index}
 												<button
 													onclick={() => selectStep(step.id)}
-													class="group flex w-full items-start gap-3 rounded-xl border p-3 transition-all {selectedStepId ===
+													class="group flex min-h-12 w-full items-center justify-center gap-3 rounded-xl border p-3 transition-all {selectedStepId ===
 													step.id
 														? 'border-white/10 bg-white/5 shadow-lg'
 														: 'border-transparent hover:border-white/5 hover:bg-white/2'}"
 												>
-													<div class="flex flex-col items-center">
+													<div class="flex flex-col items-center justify-center">
 														<div
 															class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-white/10 bg-black/40 text-xs font-bold transition-colors {step.status ===
-															'COMPLETED'
+																'COMPLETED' &&
+															step.success !== false &&
+															!step.error &&
+															step.output?.success !== false &&
+															!step.output?.error
 																? 'text-green-400 group-hover:text-green-300'
-																: 'text-red-400'} {selectedStepId === step.id
-																? 'border-green-500/50'
+																: step.status === 'SKIPPED' || step.status === 'PENDING'
+																	? 'text-zinc-500'
+																	: 'text-red-400'} {selectedStepId === step.id
+																? step.status === 'COMPLETED' &&
+																	step.success !== false &&
+																	!step.error &&
+																	step.output?.success !== false &&
+																	!step.output?.error
+																	? 'border-green-500/50'
+																	: step.status === 'SKIPPED' || step.status === 'PENDING'
+																		? 'border-white/20'
+																		: 'border-red-500/50'
 																: ''}"
 														>
-															{step.executionOrder + 1}
+															{(step.executionOrder ?? index) + 1}
 														</div>
-														{#if step.executionOrder < selectedExecutionSteps.length - 1}
-															<div class="my-1 w-px flex-1 bg-white/10"></div>
-														{/if}
 													</div>
-													<div class="min-w-0 flex-1 text-left">
-														<div class="flex items-center justify-between gap-2">
-															<span
-																class="truncate text-xs font-bold {selectedStepId === step.id
-																	? 'text-white'
-																	: 'text-zinc-400 group-hover:text-zinc-200'}"
-															>
-																{step.actionName}
-															</span>
-															{#if step.status !== 'COMPLETED'}
-																<CircleAlert class="h-3 w-3 text-red-500" />
-															{/if}
-														</div>
-														<div class="mt-0.5 flex items-center gap-2">
+													<div
+														class="flex min-w-0 flex-1 items-center justify-between gap-2 text-left"
+													>
+														<span
+															class="truncate text-xs font-bold {selectedStepId === step.id
+																? 'text-white'
+																: 'text-zinc-400 group-hover:text-zinc-200'}"
+														>
+															{step.actionName}
+														</span>
+														{#if (step.status === 'COMPLETED' && (step.success === false || step.error || step.output?.success === false || step.output?.error)) || step.status === 'FAILED'}
+															<CircleAlert class="h-3 w-3 text-red-500" />
+														{:else if step.status === 'SKIPPED' || step.status === 'PENDING'}
 															<Clock class="h-3 w-3 text-zinc-600" />
-															<span class="text-xs text-zinc-600">
-																{(
-																	(new Date(step.completedAt).getTime() -
-																		new Date(step.startedAt).getTime()) /
-																	1000
-																).toFixed(2)}s
-															</span>
-														</div>
+														{:else if step.status === 'RUNNING'}
+															<RefreshCcw class="h-3 w-3 animate-spin text-blue-400" />
+														{/if}
 													</div>
 												</button>
 											{/each}
@@ -725,13 +925,22 @@
 													<div class="mb-1 flex items-center gap-2">
 														<span
 															class="rounded px-2 py-0.5 text-[10px] font-bold tracking-wider uppercase {step.status ===
-															'COMPLETED'
+																'COMPLETED' &&
+															step.success !== false &&
+															!step.error &&
+															step.output?.success !== false &&
+															!step.output?.error
 																? 'bg-green-500/10 text-green-400'
-																: 'bg-red-500/10 text-red-400'}"
+																: step.status === 'SKIPPED' || step.status === 'PENDING'
+																	? 'bg-zinc-500/10 text-zinc-500'
+																	: step.status === 'RUNNING'
+																		? 'bg-blue-500/10 text-blue-400'
+																		: 'bg-red-500/10 text-red-400'}"
 														>
 															{step.status}
 														</span>
-														<span class="text-xs text-zinc-600">Step {step.executionOrder + 1}</span
+														<span class="text-xs text-zinc-600"
+															>Step {(step.executionOrder ?? 0) + 1}</span
 														>
 													</div>
 													<h1 class="text-3xl font-bold tracking-tight text-white">
@@ -739,18 +948,26 @@
 													</h1>
 													<p class="mt-1 text-sm text-zinc-500">{step.stepName}</p>
 												</div>
-												<div class="flex flex-col items-end gap-1">
-													<span class="text-[10px] font-bold text-zinc-600 uppercase"
-														>Time Taken</span
-													>
-													<span class="font-mono text-2xl font-bold text-white">
-														{(
-															(new Date(step.completedAt).getTime() -
-																new Date(step.startedAt).getTime()) /
-															1000
-														).toFixed(2)}s
-													</span>
-												</div>
+												{#if new Date(step.completedAt).getTime() && new Date(step.startedAt).getTime()}
+													<div class="flex flex-col items-end gap-1">
+														<span class="text-[10px] font-bold text-zinc-600 uppercase"
+															>Time Taken</span
+														>
+														<span class="font-mono text-2xl font-bold text-white">
+															{#if step.startedAt && step.completedAt}
+																{(
+																	(new Date(step.completedAt).getTime() -
+																		new Date(step.startedAt).getTime()) /
+																	1000
+																).toFixed(2)}s
+															{:else if step.status === 'RUNNING'}
+																...
+															{:else}
+																0.00s
+															{/if}
+														</span>
+													</div>
+												{/if}
 											</div>
 
 											<div class="grid grid-cols-1 gap-4">
@@ -767,12 +984,28 @@
 
 												<!-- Output Section -->
 												<div class="space-y-3">
-													<h3
-														class="flex items-center gap-2 text-xs font-bold tracking-widest text-zinc-500 uppercase"
-													>
-														<CornerRightUp class="h-4 w-4" />
-														Output Results
-													</h3>
+													<div class="flex items-center justify-between gap-2">
+														{#if (step.status !== 'COMPLETED' && step.status !== 'SKIPPED' && step.status !== 'RUNNING') || step.error || step.output?.success === false || step.output?.error}
+															<h3
+																class="flex items-center gap-2 text-xs font-bold tracking-widest text-zinc-500 uppercase"
+															>
+																<CornerRightUp class="h-4 w-4" />
+																Output Results
+															</h3>
+															<button
+																onclick={() => {
+																	// Copy error to error details if step has error conditions
+																	const errorToReport =
+																		step.output?.data || step.output || step.error || {};
+																	openSupportModalWithError(step.id, execution.id, errorToReport);
+																}}
+																class="mt-3 flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-400 transition-all hover:bg-red-500/20"
+															>
+																<Flag class="h-3 w-3" />
+																<span>Report This Error</span>
+															</button>
+														{/if}
+													</div>
 													{@render CollapsibleJson(
 														step.output?.data || step.output || step.error || {}
 													)}
@@ -780,27 +1013,6 @@
 											</div>
 
 											<!-- Errors section if any -->
-											{#if step.status !== 'COMPLETED' || step.error}
-												<div class="space-y-3">
-													<h3
-														class="flex items-center gap-2 text-xs font-bold tracking-widest text-red-400 uppercase"
-													>
-														<CircleAlert class="h-4 w-4" />
-														Error Details
-													</h3>
-													<div class="rounded-xl border border-red-500/20 bg-red-500/5 p-4">
-														<p class="mb-2 text-sm font-bold text-red-500">
-															{step.error?.message || 'Execution Failed'}
-														</p>
-														<pre
-															class="dark-scroll overflow-x-auto font-mono text-xs tracking-tight text-red-400/80">{JSON.stringify(
-																step.error || {},
-																null,
-																2
-															)}</pre>
-													</div>
-												</div>
-											{/if}
 										</div>
 									{/if}
 								</div>
@@ -826,6 +1038,19 @@
 		</section>
 	</div>
 </main>
+
+<!-- Support Modal for Error Reporting -->
+{#if showSupportModal}
+	<SupportModal
+		onClose={closeSupportModal}
+		workflows={[{ id: workflow.id, name: workflow.name }]}
+		activeWorkflowId={workflow.id}
+		executionId={supportExecutionId}
+		nodeExecutionId={supportNodeExecutionId}
+		errorDetails={supportErrorDetails}
+		expandFeedback={true}
+	/>
+{/if}
 
 <style>
 	.dark-scroll {

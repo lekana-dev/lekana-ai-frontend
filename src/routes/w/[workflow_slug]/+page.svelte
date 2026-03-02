@@ -167,6 +167,8 @@
 		workflowName = workflow.name;
 	});
 
+	let newKeyData = $state(null);
+
 	let isSynced = $derived(
 		workflow.isPublished &&
 			workflow.lastPublishedAt &&
@@ -253,10 +255,6 @@
 				workflow.name = newName;
 				await reloadWorkflow();
 			}}
-			onOpenRoles={() => {
-				showSettingsModal = false;
-				showRoleModal = true;
-			}}
 		/>
 	{/if}
 
@@ -314,6 +312,7 @@
 
 							{#if showPublishModal}
 								<Publish
+									bind:newlyCreatedKeyData={newKeyData}
 									{workflow}
 									onClose={() => (showPublishModal = false)}
 									onSubmit={async () => {
@@ -355,6 +354,7 @@
 
 							{#if showPublishModal}
 								<Publish
+									bind:newlyCreatedKeyData={newKeyData}
 									{workflow}
 									onClose={() => (showPublishModal = false)}
 									onSubmit={async () => {
@@ -366,7 +366,7 @@
 					{/if}
 				</div>
 			</div>
-			<div class="flex h-full w-full justify-center gap-2">
+			<div class="flex min-h-0 w-full flex-1 justify-center gap-2">
 				<FlowCanvas
 					{nodes}
 					{edges}
